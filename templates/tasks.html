@@ -1,0 +1,358 @@
+{% extends "base.html" %} {% block title %}Tasks - Cloud RISC-V{% endblock %} {%
+block content %}
+<div class="page-header">
+  <h1>RISC-V Tasks</h1>
+  <div>
+    <button class="btn warning" onclick="loadDemoTasks()">
+      🎯 Load Demo Tasks
+    </button>
+    <button class="btn primary" onclick="showCreateModal()">
+      + Submit Task
+    </button>
+  </div>
+</div>
+
+<div class="tasks-layout">
+  <div class="tasks-list">
+    <h2>Task Queue</h2>
+    <div id="tasks-container">
+      <p class="empty-state">Loading tasks...</p>
+    </div>
+  </div>
+
+  <div class="task-detail" id="task-detail">
+    <h2>Task Output</h2>
+    <div id="output-container" class="output-box">
+      <p class="empty-state">Select a task to view output</p>
+    </div>
+  </div>
+</div>
+
+<!-- Create Task Modal -->
+<div id="create-modal" class="modal">
+  <div class="modal-content wide">
+    <span class="close" onclick="hideCreateModal()">&times;</span>
+    <h2>Submit RISC-V Task</h2>
+    <form id="create-form" onsubmit="createTask(event)">
+      <div class="form-group">
+        <label for="task-name">Task Name</label>
+        <input
+          type="text"
+          id="task-name"
+          required
+          placeholder="e.g., Add Numbers"
+        />
+      </div>
+      <div class="form-group">
+        <label for="task-code">RISC-V Assembly Code</label>
+        <textarea
+          id="task-code"
+          rows="12"
+          required
+          placeholder="# Example: Add two numbers
+li a0, 10      # Load 10 into a0
+li a1, 20      # Load 20 into a1
+add a2, a0, a1 # a2 = a0 + a1"
+        ></textarea>
+      </div>
+      <div class="form-group">
+        <label for="target-node">Target Node (optional)</label>
+        <select id="target-node">
+          <option value="">Auto-assign to available node</option>
+        </select>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn primary">Submit Task</button>
+        <button type="button" class="btn" onclick="loadExample()">
+          Load Example
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  let currentTasks = [];
+
+  async function loadTasks() {
+    try {
+      const tasks = await fetch("/api/tasks").then((r) => r.json());
+      currentTasks = tasks;
+      const container = document.getElementById("tasks-container");
+
+      if (tasks.length === 0) {
+        container.innerHTML =
+          '<p class="empty-state">No tasks yet. Submit one to get started!</p>';
+        return;
+      }
+
+      container.innerHTML = tasks
+        .map(
+          (task) => `
+            <div class="task-item ${task.status}" onclick="showTaskOutput('${
+            task._id
+          }')">
+                <div class="task-header">
+                    <span class="task-name">${task.name}</span>
+                    <span class="status-badge ${task.status}">${
+            task.status
+          }</span>
+                </div>
+                <div class="task-meta">
+                    <span>Created: ${new Date(
+                      task.created_at
+                    ).toLocaleString()}</span>
+                </div>
+                ${
+                  task.status === "pending"
+                    ? `
+                    <button class="btn success small" onclick="event.stopPropagation(); runTask('${task._id}')">
+                        ▶ Run
+                    </button>
+                `
+                    : ""
+                }
+            </div>
+        `
+        )
+        .join("");
+    } catch (err) {
+      console.error("Failed to load tasks:", err);
+    }
+  }
+
+  async function loadRunningNodes() {
+    const nodes = await fetch("/api/nodes").then((r) => r.json());
+    const select = document.getElementById("target-node");
+    const runningNodes = nodes.filter((n) => n.status === "running");
+
+    select.innerHTML =
+      '<option value="">Auto-assign to available node</option>' +
+      runningNodes
+        .map((n) => `<option value="${n._id}">${n.name}</option>`)
+        .join("");
+  }
+
+  function showCreateModal() {
+    loadRunningNodes();
+    document.getElementById("create-modal").style.display = "flex";
+  }
+
+  function hideCreateModal() {
+    document.getElementById("create-modal").style.display = "none";
+  }
+
+  async function createTask(e) {
+    e.preventDefault();
+    const data = {
+      name: document.getElementById("task-name").value,
+      code: document.getElementById("task-code").value,
+      node_id: document.getElementById("target-node").value || null,
+    };
+
+    await fetch("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+
+    hideCreateModal();
+    document.getElementById("create-form").reset();
+    loadTasks();
+  }
+
+  async function runTask(id) {
+    const container = document.getElementById("output-container");
+    container.innerHTML =
+      '<p class="loading">Running task on RISC-V emulator...</p>';
+
+    try {
+      const response = await fetch(`/api/tasks/${id}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        container.innerHTML = `<pre class="error">Error: ${
+          result.error || "Unknown error"
+        }\n\nMake sure you have at least one node RUNNING before executing tasks.</pre>`;
+        return;
+      }
+
+      if (result.error && !result.output) {
+        container.innerHTML = `<pre class="error">${result.error}</pre>`;
+      } else {
+        container.innerHTML = `
+                <div class="output-section">
+                    <h3>Execution Output</h3>
+                    <pre>${result.output || "No output"}</pre>
+                </div>
+                ${
+                  result.error
+                    ? `<div class="output-section error"><h3>Errors</h3><pre>${result.error}</pre></div>`
+                    : ""
+                }
+            `;
+      }
+      loadTasks();
+    } catch (err) {
+      container.innerHTML = `<pre class="error">Failed to run task: ${err.message}\n\nMake sure the server is running.</pre>`;
+    }
+  }
+
+  function showTaskOutput(id) {
+    const task = currentTasks.find((t) => t._id === id);
+    if (!task) return;
+
+    const container = document.getElementById("output-container");
+
+    container.innerHTML = `
+        <div class="output-section">
+            <h3>Code</h3>
+            <pre>${task.code}</pre>
+        </div>
+        ${
+          task.output
+            ? `<div class="output-section"><h3>Output</h3><pre>${task.output}</pre></div>`
+            : ""
+        }
+        ${
+          task.error
+            ? `<div class="output-section error"><h3>Error</h3><pre>${task.error}</pre></div>`
+            : ""
+        }
+        ${
+          task.status === "pending"
+            ? `<button class="btn success" onclick="runTask('${task._id}')">▶ Run Task</button>`
+            : ""
+        }
+    `;
+  }
+
+  function loadExample() {
+    document.getElementById("task-name").value = "Calculate Sum";
+    document.getElementById(
+      "task-code"
+    ).value = `# RISC-V Example: Calculate sum of 10 + 20 + 30
+# Using RV32I base instructions
+
+li a0, 10       # Load first number
+li a1, 20       # Load second number  
+li a2, 30       # Load third number
+
+add t0, a0, a1  # t0 = a0 + a1 = 30
+add t1, t0, a2  # t1 = t0 + a2 = 60
+
+# Result is now in t1 (should be 60)
+mv a0, t1       # Move result to a0`;
+  }
+
+  // Demo tasks for presentation
+  const demoTasks = [
+    {
+      name: "1. Basic Addition",
+      code: `# Add two numbers: 10 + 20 = 30
+li a0, 10
+li a1, 20
+add a2, a0, a1`,
+    },
+    {
+      name: "2. Subtraction",
+      code: `# Subtract: 50 - 15 = 35
+li a0, 50
+li a1, 15
+sub a2, a0, a1`,
+    },
+    {
+      name: "3. Multiplication",
+      code: `# Multiply: 7 x 8 = 56
+li a0, 7
+li a1, 8
+mul a2, a0, a1`,
+    },
+    {
+      name: "4. Sum of Three Numbers",
+      code: `# Sum: 10 + 20 + 30 = 60
+li a0, 10
+li a1, 20
+li a2, 30
+add t0, a0, a1
+add a0, t0, a2`,
+    },
+    {
+      name: "5. Bitwise AND",
+      code: `# AND: 12 & 10 = 8
+# 12 = 1100, 10 = 1010
+# Result = 1000 = 8
+li a0, 12
+li a1, 10
+and a2, a0, a1`,
+    },
+    {
+      name: "6. Bitwise OR",
+      code: `# OR: 12 | 10 = 14
+# 12 = 1100, 10 = 1010
+# Result = 1110 = 14
+li a0, 12
+li a1, 10
+or a2, a0, a1`,
+    },
+    {
+      name: "7. Bitwise XOR",
+      code: `# XOR: 12 ^ 10 = 6
+# 12 = 1100, 10 = 1010
+# Result = 0110 = 6
+li a0, 12
+li a1, 10
+xor a2, a0, a1`,
+    },
+    {
+      name: "8. Shift Left",
+      code: `# Shift left: 4 << 2 = 16
+# Multiply by 4
+li a0, 4
+li a1, 2
+sll a2, a0, a1`,
+    },
+    {
+      name: "9. Shift Right",
+      code: `# Shift right: 16 >> 2 = 4
+# Divide by 4
+li a0, 16
+li a1, 2
+srl a2, a0, a1`,
+    },
+    {
+      name: "10. Fibonacci (5th)",
+      code: `# Calculate Fibonacci: 1,1,2,3,5
+# f(4) = 5
+li t0, 1       # f(0) = 1
+li t1, 1       # f(1) = 1
+add t2, t0, t1 # f(2) = 2
+add t3, t1, t2 # f(3) = 3
+add a0, t2, t3 # f(4) = 5`,
+    },
+  ];
+
+  async function loadDemoTasks() {
+    if (!confirm("This will add 10 demo tasks to the queue. Continue?")) return;
+
+    for (const task of demoTasks) {
+      await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: task.name, code: task.code }),
+      });
+    }
+
+    loadTasks();
+    alert("Demo tasks loaded! Start a node and run them one by one.");
+  }
+
+  loadTasks();
+  setInterval(loadTasks, 5000);
+</script>
+{% endblock %}

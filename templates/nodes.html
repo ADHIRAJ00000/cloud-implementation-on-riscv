@@ -1,0 +1,173 @@
+{% extends "base.html" %} {% block title %}Nodes - Cloud RISC-V{% endblock %} {%
+block content %}
+<div class="page-header">
+  <h1>RISC-V Nodes</h1>
+  <button class="btn primary" onclick="showCreateModal()">+ Create Node</button>
+</div>
+
+<div id="nodes-container" class="nodes-grid">
+  <p class="empty-state">Loading nodes...</p>
+</div>
+
+<!-- Create Node Modal -->
+<div id="create-modal" class="modal">
+  <div class="modal-content">
+    <span class="close" onclick="hideCreateModal()">&times;</span>
+    <h2>Create New Node</h2>
+    <form id="create-form" onsubmit="createNode(event)">
+      <div class="form-group">
+        <label for="node-name">Node Name</label>
+        <input
+          type="text"
+          id="node-name"
+          required
+          placeholder="e.g., riscv-node-1"
+        />
+      </div>
+      <div class="form-group">
+        <label for="memory">Memory (MB)</label>
+        <select id="memory">
+          <option value="256">256 MB</option>
+          <option value="512" selected>512 MB</option>
+          <option value="1024">1024 MB</option>
+          <option value="2048">2048 MB</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="cpu-cores">CPU Cores</label>
+        <select id="cpu-cores">
+          <option value="1" selected>1 Core</option>
+          <option value="2">2 Cores</option>
+          <option value="4">4 Cores</option>
+        </select>
+      </div>
+      <button type="submit" class="btn primary">Create Node</button>
+    </form>
+  </div>
+</div>
+
+<script>
+  async function loadNodes() {
+    try {
+      const nodes = await fetch("/api/nodes").then((r) => r.json());
+      const container = document.getElementById("nodes-container");
+
+      if (nodes.length === 0) {
+        container.innerHTML =
+          '<p class="empty-state">No nodes created yet. Click "Create Node" to add one.</p>';
+        return;
+      }
+
+      container.innerHTML = nodes
+        .map(
+          (node) => `
+            <div class="node-card ${node.status}">
+                <div class="node-header">
+                    <h3>${node.name}</h3>
+                    <span class="status-badge ${node.status}">${
+            node.status
+          }</span>
+                </div>
+                <div class="node-specs">
+                    <div class="spec">
+                        <span class="spec-label">Memory</span>
+                        <span class="spec-value">${node.memory_mb} MB</span>
+                    </div>
+                    <div class="spec">
+                        <span class="spec-label">CPU Cores</span>
+                        <span class="spec-value">${node.cpu_cores}</span>
+                    </div>
+                    <div class="spec">
+                        <span class="spec-label">Tasks Done</span>
+                        <span class="spec-value">${node.tasks_completed}</span>
+                    </div>
+                </div>
+                ${
+                  node.status === "running"
+                    ? `
+                <div class="node-usage">
+                    <div class="usage-item">
+                        <span>CPU: ${node.cpu_usage}%</span>
+                        <div class="mini-bar"><div class="mini-fill" style="width:${
+                          node.cpu_usage
+                        }%"></div></div>
+                    </div>
+                    <div class="usage-item">
+                        <span>RAM: ${node.memory_used}/${
+                        node.memory_mb
+                      } MB</span>
+                        <div class="mini-bar"><div class="mini-fill" style="width:${
+                          (node.memory_used / node.memory_mb) * 100
+                        }%"></div></div>
+                    </div>
+                </div>
+                `
+                    : ""
+                }
+                <div class="node-actions">
+                    ${
+                      node.status === "stopped"
+                        ? `<button class="btn success" onclick="startNode('${node._id}')">▶ Start</button>`
+                        : `<button class="btn warning" onclick="stopNode('${node._id}')">⏹ Stop</button>`
+                    }
+                    <button class="btn danger" onclick="deleteNode('${
+                      node._id
+                    }')">🗑 Delete</button>
+                </div>
+            </div>
+        `
+        )
+        .join("");
+    } catch (err) {
+      console.error("Failed to load nodes:", err);
+    }
+  }
+
+  function showCreateModal() {
+    document.getElementById("create-modal").style.display = "flex";
+  }
+
+  function hideCreateModal() {
+    document.getElementById("create-modal").style.display = "none";
+  }
+
+  async function createNode(e) {
+    e.preventDefault();
+    const data = {
+      name: document.getElementById("node-name").value,
+      memory_mb: parseInt(document.getElementById("memory").value),
+      cpu_cores: parseInt(document.getElementById("cpu-cores").value),
+    };
+
+    await fetch("/api/nodes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+
+    hideCreateModal();
+    document.getElementById("create-form").reset();
+    loadNodes();
+  }
+
+  async function startNode(id) {
+    await fetch(`/api/nodes/${id}/start`, { method: "POST" });
+    loadNodes();
+  }
+
+  async function stopNode(id) {
+    await fetch(`/api/nodes/${id}/stop`, { method: "POST" });
+    loadNodes();
+  }
+
+  async function deleteNode(id) {
+    if (confirm("Are you sure you want to delete this node?")) {
+      await fetch(`/api/nodes/${id}`, { method: "DELETE" });
+      loadNodes();
+    }
+  }
+
+  loadNodes();
+  setInterval(loadNodes, 5000);
+</script>
+{% endblock %}

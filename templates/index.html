@@ -1,0 +1,177 @@
+{% extends "base.html" %} {% block title %}Dashboard - Cloud RISC-V{% endblock
+%} {% block content %}
+<div class="dashboard">
+  <h1>Cloud Dashboard</h1>
+  <p class="subtitle">RISC-V Cloud Infrastructure Simulation</p>
+
+  <!-- Real System Info Banner -->
+  <div class="card system-info-card" id="system-info">
+    <h2>🖥️ Host System (Real Hardware)</h2>
+    <div class="system-stats">
+      <div class="sys-stat">
+        <span class="sys-label">CPU Cores</span>
+        <span class="sys-value" id="sys-cores">-</span>
+      </div>
+      <div class="sys-stat">
+        <span class="sys-label">CPU Freq</span>
+        <span class="sys-value" id="sys-freq">-</span>
+      </div>
+      <div class="sys-stat">
+        <span class="sys-label">Total RAM</span>
+        <span class="sys-value" id="sys-ram">-</span>
+      </div>
+      <div class="sys-stat">
+        <span class="sys-label">RAM Used</span>
+        <span class="sys-value" id="sys-ram-used">-</span>
+      </div>
+      <div class="sys-stat">
+        <span class="sys-label">Disk</span>
+        <span class="sys-value" id="sys-disk">-</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-icon">🖥️</div>
+      <div class="stat-info">
+        <span class="stat-value" id="total-nodes">0</span>
+        <span class="stat-label">Total Nodes</span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">✅</div>
+      <div class="stat-info">
+        <span class="stat-value" id="running-nodes">0</span>
+        <span class="stat-label">Running Nodes</span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">📋</div>
+      <div class="stat-info">
+        <span class="stat-value" id="total-tasks">0</span>
+        <span class="stat-label">Total Tasks</span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">🎯</div>
+      <div class="stat-info">
+        <span class="stat-value" id="completed-tasks">0</span>
+        <span class="stat-label">Completed</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-grid">
+    <div class="card">
+      <h2>Resource Usage</h2>
+      <div class="resource-bars">
+        <div class="resource-item">
+          <span class="resource-label">CPU Usage</span>
+          <div class="progress-bar">
+            <div class="progress-fill" id="cpu-bar" style="width: 0%"></div>
+          </div>
+          <span class="resource-value" id="cpu-value">0%</span>
+        </div>
+        <div class="resource-item">
+          <span class="resource-label">Memory</span>
+          <div class="progress-bar">
+            <div
+              class="progress-fill memory"
+              id="memory-bar"
+              style="width: 0%"
+            ></div>
+          </div>
+          <span class="resource-value" id="memory-value">0 MB</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Quick Actions</h2>
+      <div class="quick-actions">
+        <a href="/nodes" class="action-btn">➕ Create Node</a>
+        <a href="/tasks" class="action-btn">📝 Submit Task</a>
+        <a href="/logs" class="action-btn">📊 View Logs</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Active Nodes</h2>
+    <div id="active-nodes" class="nodes-preview">
+      <p class="empty-state">No active nodes. Create one to get started!</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  async function loadDashboard() {
+    try {
+      const stats = await fetch("/api/stats").then((r) => r.json());
+
+      document.getElementById("total-nodes").textContent = stats.total_nodes;
+      document.getElementById("running-nodes").textContent =
+        stats.running_nodes;
+      document.getElementById("total-tasks").textContent = stats.total_tasks;
+      document.getElementById("completed-tasks").textContent =
+        stats.completed_tasks;
+
+      // Update real system info
+      if (stats.system) {
+        const sys = stats.system;
+        document.getElementById("sys-cores").textContent =
+          sys.cpu_cores + " cores";
+        document.getElementById("sys-freq").textContent =
+          sys.cpu_freq_mhz + " MHz";
+        document.getElementById("sys-ram").textContent =
+          Math.round(sys.total_memory_mb / 1024) + " GB";
+        document.getElementById("sys-ram-used").textContent =
+          sys.memory_percent + "%";
+        document.getElementById("sys-disk").textContent =
+          sys.used_disk_gb + "/" + sys.total_disk_gb + " GB";
+      }
+
+      const cpuPercent = stats.avg_cpu_usage || 0;
+      document.getElementById("cpu-bar").style.width = cpuPercent + "%";
+      document.getElementById("cpu-value").textContent = cpuPercent + "%";
+
+      const memPercent =
+        stats.total_memory_mb > 0
+          ? Math.round((stats.used_memory_mb / stats.total_memory_mb) * 100)
+          : 0;
+      document.getElementById("memory-bar").style.width = memPercent + "%";
+      document.getElementById(
+        "memory-value"
+      ).textContent = `${stats.used_memory_mb} / ${stats.total_memory_mb} MB`;
+
+      // Load active nodes
+      const nodes = await fetch("/api/nodes").then((r) => r.json());
+      const activeNodes = nodes.filter((n) => n.status === "running");
+      const container = document.getElementById("active-nodes");
+
+      if (activeNodes.length === 0) {
+        container.innerHTML =
+          '<p class="empty-state">No active nodes. Create one to get started!</p>';
+      } else {
+        container.innerHTML = activeNodes
+          .map(
+            (node) => `
+                <div class="node-mini">
+                    <span class="node-name">${node.name}</span>
+                    <span class="node-status running">Running</span>
+                    <span class="node-cpu">CPU: ${node.cpu_usage}%</span>
+                </div>
+            `
+          )
+          .join("");
+      }
+    } catch (err) {
+      console.error("Failed to load dashboard:", err);
+    }
+  }
+
+  loadDashboard();
+  setInterval(loadDashboard, 5000);
+</script>
+{% endblock %}
